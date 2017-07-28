@@ -54,14 +54,18 @@
 #define                TEMPSENSOR_READDELAY 5000           // Temperature sensor read interval if driver does not poll
 #define                TEMPSENSOR_SAMPLEDELAY 5000         // Temperature sample interval to calculate average temperature. For 30 samples at 5s interval will average out temperature in last 150s.
 
-#define                PIN_OUTPUT_MOTOR1 4                 // Motor pin
-#define                PIN_OUTPUT_MOTOR2 5
-#define                PIN_OUTPUT_MOTOR3 6
-#define                PIN_OUTPUT_MOTOR4 7
-#define                PIN_INPUT_BUT_FW 8                  // Maunal movement button
-#define                PIN_INPUT_BUT_BW 9
-#define                PIN_INPUT_SENSOR 10                  // Tempeature sensors
-#define                PIN_INPUT_POTENTION 11               // Analog input
+#define                PIN_OUTPUT_MOTOR1 2                 // Motor pins
+#define                PIN_OUTPUT_MOTOR2 3
+#define                PIN_OUTPUT_MOTOR3 4
+#define                PIN_OUTPUT_MOTOR4 5
+#define                PIN_OUTPUT_DUSTCAP1 6               // Dustcap motor pins
+#define                PIN_OUTPUT_DUSTCAP2 7
+#define                PIN_OUTPUT_DUSTCAP3 8
+#define                PIN_OUTPUT_DUSTCAP4 9
+#define                PIN_INPUT_SENSOR 10                 // Tempeature sensors
+#define                PIN_INPUT_BUT_FW 11                  // Maunal movement button
+#define                PIN_INPUT_BUT_BW 12
+//#define                PIN_INPUT_POTENTION 11              // Analog input
 #define                PIN_OUTPUT_STATUS 13                // To report error when temperature has gone up over hysteresis threshold when TempComp is on.
 
 #define                LEDBLINK_INTERVAL   250             // 250ms
@@ -72,6 +76,7 @@
 
 // ULN2003 requires IN1-IN3-IN2-IN4
 AccelStepper           stepper(AccelStepper::FULL4WIRE, PIN_OUTPUT_MOTOR1, PIN_OUTPUT_MOTOR3, PIN_OUTPUT_MOTOR2, PIN_OUTPUT_MOTOR4, false);
+AccelStepper           dustcap(AccelStepper::FULL4WIRE, PIN_OUTPUT_DUSTCAP1, PIN_OUTPUT_DUSTCAP3, PIN_OUTPUT_DUSTCAP2, PIN_OUTPUT_DUSTCAP4, false);
 
 ///////////////////////////
 // Temperature Sensor
@@ -111,6 +116,9 @@ boolean                isRunning = false;
 // Max can be set via serial command YX.
 long                   MaxSteps = 25000;
 long                   MinSteps = 0;
+
+long                   dustcapClosedPosition = 0;
+long                   dustcapOpenedPosition = 0;
 
 ///////////////////////////
 // Speed multipler
@@ -167,6 +175,9 @@ unsigned long                   millisLastTempSensorLatch = 0;     // Last tempe
 unsigned long                   millisLastTempSensorRead = 0;      // Last temperature sensor read timer
 unsigned long                   millisLastTempCompMove = 0;        // Last move timer during TempComp
 
+unsigned long                   millisLastDustcapMove = 0;         // Last move timer to turn off stepper output
+
+
 ///////////////////////////
 //Manual move control
 ///////////////////////////
@@ -206,7 +217,7 @@ boolean                MoonliteMode = true;
 
 int                    i;
 
-bool debug = false;
+bool debug = true;
 
 void setup()
 {
@@ -275,6 +286,11 @@ void setup()
   stepper.setAcceleration(100);
   millisLastMove = millis();
 
+  // initalize dustcap motor
+  dustcap.setMaxSpeed(200);
+  dustcap.setAcceleration(100);
+  millisLastDustcapMove = millis();
+
   // initialize serial command
   memset(packet, 0, MAXCOMMAND);
 
@@ -282,12 +298,30 @@ void setup()
   EEPROM.get(EEPROM_POS_LOC, CurrentPosition);
   stepper.setCurrentPosition(CurrentPosition);
   lastSavedPosition = CurrentPosition;
+
+  if(debug)
+  {
+    Serial.print("Focuser current position: "); Serial.print(CurrentPosition); Serial.println("");
+  }
+
+  // read dustcap position as closed position - won't work of course, needs eeprom
+  dustcapClosedPosition = dustcap.currentPosition();
+  dustcapOpenedPosition = dustcapClosedPosition + 1000;
+
+  if(debug)
+  {
+    Serial.print("Dustcap closed position: "); Serial.print(dustcapClosedPosition); Serial.println("");
+    Serial.print("Dustcap opened position: "); Serial.print(dustcapOpenedPosition); Serial.println("");
+  }
 }
 
 void loop()
 {
   double    Scratch_Double;
   int       Error_Code;
+  
+  char tempString[32];
+  memset(tempString,'\0',sizeof(tempString));
 
   if (eoc) {
     // process the command we got
@@ -312,6 +346,11 @@ void loop()
     eoc = false;
     idx = 0;
 
+    if(debug)
+    {
+      Serial.println(""); Serial.print("Command: "); Serial.print(cmd); Serial.print(" - Argument: "); Serial.println(param);
+    }
+
     // the stand-alone program sends :C# :GB# on startup
     // :C# is a temperature conversion, doesn't require any response
 
@@ -323,6 +362,23 @@ void loop()
       //}
     }
 
+    // OUT-OF-SPEC: Dustcap control
+    if(!strcasecmp(cmd, "DC")) {
+      long const doOpen = hexstr2long(param);      
+      if(2 == doOpen)
+      {
+        snprintf(tempString, sizeof(tempString), "%04X#", (int)0);
+        Serial.print(tempString);
+      }
+      else if(1 == doOpen && dustcap.currentPosition() == dustcapClosedPosition) {
+        dustcap.enableOutputs();
+        dustcap.moveTo(dustcapOpenedPosition);
+      } else if(0 == doOpen && dustcap.currentPosition() == dustcapOpenedPosition) {
+        dustcap.enableOutputs();
+        dustcap.moveTo(dustcapClosedPosition);
+      }
+    }
+
     // initiate a move
     if (!strcasecmp(cmd, "FG")) {
       // Ignore move when Temp Comp is enabled
@@ -331,9 +387,7 @@ void loop()
       {
         stepper.enableOutputs();
         stepper.moveTo(TargetPosition);
-        char tempString[64];
-        sprintf(tempString, "%08ld: %06d %+06d = %06d!", millis(), (int)stepper.currentPosition(), (int)stepper.targetPosition(), (int)stepper.distanceToGo());
-        Serial.println(tempString);
+        outputDebugState('>');
       }
     }
 
@@ -342,11 +396,12 @@ void loop()
     // if we stop the motor abruptly then somehow stepper library does not handle current/target position correctly.
     if (!strcasecmp(cmd, "FQ")) {
       stepper.stop();
+      dustcap.stop();
     }
 
     // get the temperature coefficient which is set by SC
     if (!strcasecmp(cmd, "GC")) {
-      char tempString[6];
+      //char tempString[6];
       sprintf(tempString, "%02X", TempCoefficientRaw);
       Serial.print(tempString);
       Serial.print("#");
@@ -354,7 +409,7 @@ void loop()
 
     // get the current motor speed, only values of 02, 04, 08, 10, 20, which is set by SD
     if (!strcasecmp(cmd, "GD")) {
-      char tempString[6];
+      //char tempString[6];
       sprintf(tempString, "%02X", SpeedFactorRaw);
       Serial.print(tempString);
       Serial.print("#");
@@ -386,7 +441,7 @@ void loop()
       // reset temp sensor read timer.
       millisLastTempSensorRead = millis();
 
-      char tempString[6];
+      //char tempString[6];
       if (MoonliteMode)
         // compatability mode, 0.5 percent resolution
         sprintf(tempString, "%04X", (int)(TempSensor_Reading/0.5));
@@ -398,7 +453,7 @@ void loop()
 
     // get the new motor position (target) set by SN
     if (!strcasecmp(cmd, "GN")) {
-      char tempString[6];
+      //char tempString[6];
       sprintf(tempString, "%04X", TargetPosition);
       Serial.print(tempString);
       Serial.print("#");
@@ -407,7 +462,7 @@ void loop()
     // get the current motor position
     if (!strcasecmp(cmd, "GP")) {
       CurrentPosition = stepper.currentPosition();
-      char tempString[6];
+      //char tempString[6];
       sprintf(tempString, "%04X", CurrentPosition);
       Serial.print(tempString);
       Serial.print("#");
@@ -424,7 +479,7 @@ void loop()
       // reset temp sensor read timer.
       millisLastTempSensorRead = millis();
 
-      char tempString[6];
+      //char tempString[6];
       if (MoonliteMode)
         // compatability mode, 0.5 degeee resolution
         sprintf(tempString, "%04X", (int)(TempSensor_Reading/0.5));
@@ -542,7 +597,7 @@ void loop()
 
     // get backlash set by YB
     if (!strcasecmp(cmd, "ZB")) {
-      char tempString[6];
+      //char tempString[6];
       sprintf(tempString, "%02X", Backlash);
       Serial.print(tempString);
       Serial.print("#");
@@ -556,7 +611,7 @@ void loop()
 
     // get TempComp threshold set by YT
     if (!strcasecmp(cmd, "ZT")) {
-      char tempString[6];
+      //char tempString[6];
       sprintf(tempString, "%02X", TempCompThresholdRaw);
       Serial.print(tempString);
       Serial.print("#");
@@ -567,7 +622,7 @@ void loop()
     }
 
     if (!strcasecmp(cmd, "ZX")) {
-      char tempString[6];
+      //char tempString[6];
       sprintf(tempString, "%04X", MaxSteps);
       Serial.print(tempString);
       Serial.print("#");
@@ -583,7 +638,7 @@ void loop()
         TempInt = ~abs(TempInt) & 0xFFFF;
       }
 
-      char tempString[6];
+      //char tempString[6];
       sprintf(tempString, "%04X", TempInt);
       Serial.print(tempString);
       Serial.print("#");
@@ -596,12 +651,40 @@ void loop()
 
   unsigned long now = millis();
 
+  isRunning = dustcap.targetPosition() != dustcap.currentPosition();
+
+  static bool stopDustcapDone = false;
+  if (isRunning)
+  {
+    dustcap.run();
+    stopDustcapDone = false;
+
+    static unsigned long lastprint = 0;
+    if(debug && now - lastprint > 1000)
+    {
+      outputDebugState('D');
+      lastprint = now;
+    }
+  }
+  else
+  {
+    if (!!stopDustcapDone && now - millisLastDustcapMove > STEPPER_DISABLEDELAY)
+    {
+      dustcap.disableOutputs();
+
+      millisLastDustcapMove = now;
+      stopDustcapDone = true;
+    }
+  }
+
   isRunning = stepper.targetPosition() != stepper.currentPosition();
 
   // move motor if not done
+  static bool stopStepperDone = false;
   if (isRunning)
   {
     stepper.run();
+    stopStepperDone = false;
 
     static unsigned long lastprint = 0;
     if(debug && now - lastprint > 1000)
@@ -614,7 +697,7 @@ void loop()
   else
   {
     // Turn off driver to save power if it is immobile for enough time
-    if (now - millisLastMove > STEPPER_DISABLEDELAY)
+    if (!stopStepperDone && now - millisLastMove > STEPPER_DISABLEDELAY)
     {
       stepper.disableOutputs();
       if(debug) outputDebugState('.');
@@ -627,6 +710,7 @@ void loop()
       }
 
       millisLastMove = now;
+      stopStepperDone = true;
     }
 
     // TempComp average temperature calculation
@@ -875,87 +959,57 @@ float DHT_getHumidity()
 
 void outputDebugState(char action)
 {
-  char tempString[64];
-  sprintf(tempString, "%08ld: %03d.%02d*C %03d.%02d%% %06d - %+06d = %06d @ %06d %c", millis(), (int)TempSensor_Reading, (int)(TempSensor_Reading*100)%100, (int)HumiSensor_Reading, (int)(HumiSensor_Reading*100)%100, (int)stepper.currentPosition(), (int)stepper.targetPosition(), (int)stepper.distanceToGo(), (int)stepper.speed(), action);
+  char tempString[128];
+  snprintf(tempString, sizeof(tempString), "%08ld: %03d.%02d*C %03d.%02d%% %06d - %+06d = %06d @ %06d ; %06d - %+06d = %06d @ %06d %c",
+    millis(),
+    (int)TempSensor_Reading, (int)(TempSensor_Reading*100)%100,
+    (int)HumiSensor_Reading, (int)(HumiSensor_Reading*100)%100,
+    (int)stepper.currentPosition(), (int)stepper.targetPosition(), (int)stepper.distanceToGo(), (int)stepper.speed(),
+    (int)dustcap.currentPosition(), (int)dustcap.targetPosition(), (int)dustcap.distanceToGo(), (int)dustcap.speed(),
+    action);
   Serial.println(tempString);
 }
 
 void outputDebugInfo()
 {
-  Serial.print("Temperature Sensor Presnet: ");
-  Serial.print(TempSensor_Present);
-  Serial.print("\n");
-
-  if (TempSensor_Present) {
-    Serial.print("Temperature: ");
-    Serial.print(TempSensor_Reading);
-    Serial.print("\n");
+  Serial.print("Temperature Sensor\n Present: "); Serial.print(TempSensor_Present); Serial.print("\n");
+  Serial.print(" T: "); Serial.print(TempSensor_Reading); Serial.print("\n");
+  Serial.print(" Coefficient: "); Serial.print(TempCoefficient); Serial.print("\n");
+  for (i = 0; i < TEMPSENSOR_ARRAY_SIZE; i++)
+  {
+    Serial.print(" T#"); Serial.print(i); Serial.print(": ");
+    Serial.print(TempSensor_Valid_Array[i]); Serial.print(" ");
+    Serial.println(TempSensor_Array[i]);
   }
+  Serial.print(" Average: ");
+  Serial.println(TempSensor_Average);
 
-  Serial.print("Temperature Coefficient: ");
-  Serial.print(TempCoefficient);
-  Serial.print("\n");
-
-  if (TempSensor_Present) {
-    Serial.print("Temperature: ");
-    Serial.print(TempSensor_Reading);
-    Serial.print("\n");
-  }
-
-  Serial.print("Temperature Coefficient: ");
-  Serial.print(TempCoefficient);
-  Serial.print("\n");
-
-  for (i = 0; i < TEMPSENSOR_ARRAY_SIZE; i++) {
-    Serial.print(TempSensor_Valid_Array[i]);
-    Serial.print(TempSensor_Array[i]);
-    Serial.print("\n");
-  }
-  Serial.print("Temperature Average");
-  Serial.print(TempSensor_Average);
-  Serial.print("\n");
-
-
-  Serial.print("TempComp Last Temperature");
-  Serial.print(TempCompLastTemperature);
-  Serial.print("\n");
-
-  Serial.print("TempComp Original Temperature");
-  Serial.print(TempCompOriginalTemperature);
-  Serial.print("\n");
-
-  Serial.print("TempComp Orignial Position");
-  Serial.print(TempCompOriginalPosition);
-  Serial.print("\n");
-
-  Serial.print("TempComp Target Position");
-  Serial.print(TempCompTargetPosition);
-  Serial.print("\n");
+  Serial.print("Compensation\n Last T: "); Serial.println(TempCompLastTemperature);
+  Serial.print(" Original T: "); Serial.println(TempCompOriginalTemperature);
+  Serial.print(" Original Position: "); Serial.println(TempCompOriginalPosition);
+  Serial.print(" Target Position: "); Serial.println(TempCompTargetPosition);
 
   //Serial.print("Last Position");
   //Serial.print(TempCompLastPosition);
   //Serial.print("\n");
 
-  Serial.print("Stepper current Position");
-  Serial.print(stepper.currentPosition());
-  Serial.print("\n");
+  Serial.print("Steppers\n Focuser Position: "); Serial.println(stepper.currentPosition());
+  Serial.print(" Dustcap Position: "); Serial.println(dustcap.currentPosition());
 
-  Serial.print("current potention reading");
-  Serial.print(analogRead(PIN_INPUT_POTENTION));
+  Serial.print("Potentiometer\n Current Reading: ");
+  //Serial.print(analogRead(PIN_INPUT_POTENTION));
   Serial.print("\n");
 
   //Serial.print("speed");
   //Serial.print(MAXSPEED*(float)analogRead(PIN_INPUT_POTENTION)/1024);
   //Serial.print("\n");
 
-  Serial.print("FW Button Status ");
+  Serial.print("Buttons\n FW: ");
   if (!BUT_MOVEMENT_ENABLED) Serial.print("(disabled) ");
-  Serial.print(digitalRead(PIN_INPUT_BUT_FW));
-  Serial.print("\n");
+  Serial.println(digitalRead(PIN_INPUT_BUT_FW));
 
-  Serial.print("BW Button Status ");
+  Serial.print(" BW: ");
   if (!BUT_MOVEMENT_ENABLED) Serial.print("(disabled) ");
-  Serial.print(digitalRead(PIN_INPUT_BUT_BW));
-  Serial.print("\n");
+  Serial.println(digitalRead(PIN_INPUT_BUT_BW));
 }
 
