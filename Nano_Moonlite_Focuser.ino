@@ -187,8 +187,8 @@ unsigned long                   millisLastDustcapMove = 0;         // Last move 
 #define                BUT_READING_RELEASED 0
 #define                BUT_READING_PRESSED 1
 
-int                    lastReadingButFW = BUT_READING_RELEASED;               //
-int                    lastReadingButBW = BUT_READING_RELEASED;
+//int                    lastReadingButFW = BUT_READING_RELEASED;               //
+//int                    lastReadingButBW = BUT_READING_RELEASED;
 
 // Button press timer to increase motor move steps (ie, effective motor speed).
 unsigned long                   millisButFWPressed = 0;
@@ -248,6 +248,7 @@ void setup()
     sensor_t sensor;
     {
       TempSensor.temperature().getSensor(&sensor);
+      /*
       Serial.println("------------------------------------");
       Serial.println("Temperature");
       Serial.print ("Sensor: "); Serial.println(sensor.name);
@@ -261,9 +262,11 @@ void setup()
       ticks = millis() - ticks;
       Serial.print ("Temperature: "); Serial.print(v); Serial.print(" *C ("); Serial.print(ticks); Serial.println(" ms)");
       Serial.println("------------------------------------");
+      */
     }
     {
       TempSensor.humidity().getSensor(&sensor);
+      /*
       Serial.println("Humidity");
       Serial.print ("Sensor: "); Serial.println(sensor.name);
       Serial.print ("Driver Ver: "); Serial.println(sensor.version);
@@ -276,6 +279,7 @@ void setup()
       ticks = millis() - ticks;
       Serial.print ("Humidity: "); Serial.print(v); Serial.print(" % ("); Serial.print(ticks); Serial.println(" ms)");
       Serial.println("------------------------------------");
+      */
     }
   }
 
@@ -973,12 +977,12 @@ float DHT_getHumidity()
 void outputDebugState(char action)
 {
   char tempString[128];
-  snprintf(tempString, sizeof(tempString), "%08ld: %03d.%02d*C %03d.%02d%% %06d - %+06d = %06d @ %06d ; %06d - %+06d = %06d @ %06d %c",
+  snprintf(tempString, sizeof(tempString), "%08ld: %03d.%02d*C %03d.%02d%% %04X - %04X (B%+02d) = %04X @ %06d ; %04X - %04Xd = %04X @ %06d %c",
     millis(),
     (int)TempSensor_Reading, (int)(TempSensor_Reading*100)%100,
     (int)HumiSensor_Reading, (int)(HumiSensor_Reading*100)%100,
-    (int)stepper.currentPosition(), (int)stepper.targetPosition(), (int)stepper.distanceToGo(), (int)stepper.speed(),
-    (int)dustcap.currentPosition(), (int)dustcap.targetPosition(), (int)dustcap.distanceToGo(), (int)dustcap.speed(),
+    (int)stepper.currentPosition(), (int)stepper.targetPosition(), (int)Backlash, (int)stepper.distanceToGo(), (int)stepper.speed(),
+    (int)dustcap.currentPosition(), (int)dustcap.targetPosition(),                (int)dustcap.distanceToGo(), (int)dustcap.speed(),
     action);
   Serial.println(tempString);
 }
