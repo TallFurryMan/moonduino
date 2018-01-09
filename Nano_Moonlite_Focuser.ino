@@ -2,6 +2,7 @@
 //
 // Uses AccelStepper (http://www.airspayce.com/mikem/arduino/AccelStepper/)
 //1	2	3	4	5	6	7	8
+//: D #             N/A         Toggle debugging on/off for the Arduino IDE
 //:	C	#	 	 	 	 	 	 	N/A	        Initiate a temperature conversion; the conversion process takes a maximum of 750 milliseconds. The value returned by the :GT# command will not be valid until the conversion process completes.
 //:	F	G	#	 	 	 	 	 	N/A	        Go to the new position as set by the ":SNYYYY#" command.
 //:	F	Q	#	 	 	 	 	 	N/A	        Immediately stop any focus motor movement.
@@ -217,7 +218,7 @@ boolean                MoonliteMode = true;
 
 int                    i;
 
-bool debug = true;
+bool debug = false;
 
 void setup()
 {
@@ -348,7 +349,9 @@ void loop()
 
     if(debug)
     {
-      Serial.println(""); Serial.print("Command: "); Serial.print(cmd); Serial.print(" - Argument: "); Serial.println(param);
+      snprintf(tempString,sizeof(tempString),"Cmd: %.2s - Arg: %.6s",cmd,param);
+      Serial.println("");
+      Serial.println(tempString);
     }
 
     // the stand-alone program sends :C# :GB# on startup
@@ -360,6 +363,15 @@ void loop()
       //if (TempSensor_Present) {
       //  TempSensor.requestTemperatures();
       //}
+    }
+
+    // toggle debug on/off
+    if (!strcasecmp(cmd, "D")) {
+      debug = !debug;
+      if(debug)
+      {
+        Serial.println("Debug enabled\n");
+      }
     }
 
     // OUT-OF-SPEC: Dustcap control
@@ -387,7 +399,8 @@ void loop()
       {
         stepper.enableOutputs();
         stepper.moveTo(TargetPosition);
-        outputDebugState('>');
+                
+        if(debug) outputDebugState('>');
       }
     }
 
@@ -646,7 +659,7 @@ void loop()
 
     // Debug Info
     if (!strcasecmp(cmd, "SS"))
-      outputDebugInfo();
+      if(debug) outputDebugInfo();
   }
 
   unsigned long now = millis();
