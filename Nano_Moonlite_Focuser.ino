@@ -160,8 +160,10 @@ float                  TempSensor_Average = TEMPERATURE_DEFAULT;
 boolean                TempSensor_Valid_Array[TEMPSENSOR_ARRAY_SIZE];
 int                    TempSensor_Valid_Total;
 
-// Backlash, NOT being used
-int                    Backlash = 0;
+// Backlash to be used on next change of direction - long for eeprom
+long                   Backlash = 0; // [FPTN,FNTP]
+#define                BACKLASH_FNTP (+11)
+#define                BACKLASH_FPTN (-11)
 
 //#define                DIRUP false
 //#define                DIRDOWN true
@@ -200,6 +202,7 @@ unsigned long                   millisButBWPressed = 0;
 
 #define                EEPROM_POS_LOC 0
 long                   lastSavedPosition = 0;
+#define                EEPROM_POS_BACKLASH 8
 
 ///////////////////////////
 // LED signals
@@ -303,6 +306,9 @@ void setup()
   EEPROM.get(EEPROM_POS_LOC, CurrentPosition);
   stepper.setCurrentPosition(CurrentPosition);
   lastSavedPosition = CurrentPosition;
+  EEPROM.get(EEPROM_POS_BACKLASH, Backlash);
+  if(Backlash!=BACKLASH_FNTP||Backlash!=BACKLASH_FPTN||Backlash!=0)
+    Backlash = 0;
 
   if(debug)
   {
@@ -401,7 +407,32 @@ void loop()
       // Need to revisit as there could be MOVE due to filter change
       if (!TempCompEn)
       {
+        CurrentPosition = stepper.currentPosition();
         stepper.enableOutputs();
+
+        if(debug)
+        {
+          snprintf(tempString, sizeof(tempString), "C%04X T%04X B%+02d",(int)CurrentPosition,(int)TargetPosition,(int)Backlash);
+          Serial.println(tempString);
+        }
+        
+        // If switching direction, add backlash to compensate for the next move
+        if((CurrentPosition < TargetPosition && 0 < Backlash)||(TargetPosition < CurrentPosition && Backlash < 0))
+          TargetPosition += Backlash;
+        // Then, prepare backlash for the next move
+        if(CurrentPosition < TargetPosition)
+          Backlash = BACKLASH_FPTN;
+        else if(TargetPosition < CurrentPosition)
+          Backlash = BACKLASH_FNTP;
+        else
+          Backlash = 0;
+
+        if(debug)
+        {
+          snprintf(tempString, sizeof(tempString), "C%04X T%04X B%+02d",(int)CurrentPosition,(int)TargetPosition,(int)Backlash);
+          Serial.println(tempString);
+        }
+
         stepper.moveTo(TargetPosition);
                 
         if(debug) outputDebugState('>');
@@ -720,10 +751,12 @@ void loop()
       if(debug) outputDebugState('.');
 
       // Save current location in EEPROM
+      CurrentPosition = stepper.currentPosition();
       if (lastSavedPosition != CurrentPosition)
       {
         EEPROM.put(EEPROM_POS_LOC, CurrentPosition);
         lastSavedPosition = CurrentPosition;
+        EEPROM.put(EEPROM_POS_BACKLASH, Backlash);
       }
 
       millisLastMove = now;
