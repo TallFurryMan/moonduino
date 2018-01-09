@@ -336,7 +336,7 @@ void loop()
 
   if (eoc) {
     // process the command we got
-    cmd[0] = '\0';
+    cmd[0] = cmd[1] = cmd[2] = '\0';
     memset(param, 0, MAXCOMMAND);
 
     int len = strlen(packet);
