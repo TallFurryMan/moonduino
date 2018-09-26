@@ -160,6 +160,23 @@ float                  TempSensor_Average = TEMPERATURE_DEFAULT;
 boolean                TempSensor_Valid_Array[TEMPSENSOR_ARRAY_SIZE];
 int                    TempSensor_Valid_Total;
 
+// Simple backlash management
+// - When motor step was decreasing, and is now increasing, apply a positive backlash
+// - When motor step was increasing, and is now decreasing, apply a negative backlash
+// This causes the firmware to return P+/-backlash as position when requested to go to position P
+// #define SIMPLE_BLACKLASH
+
+// Outward backlash management (idea by Richard Beck on indilib.org)
+// - When motor step is requested to increase, add a positive backlash, then when move is finished, move backwards by the same backlash
+// - When motor step is requested to decrease, move to the requested position
+// This causes the firmware to return P as position when requested to go to position P, and makes sure gear backlash is always outward, preventing slipping
+#define OUTWARD_BACKLASH
+
+#define WILL_GO_INWARDS(current_pos, next_pos) ((current_pos) < (next_pos))
+#define WILL_GO_OUTWARDS(current_pos, next_pos) ((current_pos) > (next_pos))
+#define INWARDS_BY(pos, offset) ((pos)+(offset))
+#define OUTWARDS_BY(pos, offset) ((pos)-(offset))
+
 // Backlash to be used on next change of direction - long for eeprom
 long                   Backlash = 0; // [FPTN,FNTP]
 #define                BACKLASH_FNTP (+11)
@@ -313,6 +330,13 @@ void setup()
   if(debug)
   {
     Serial.print("Focuser current position: "); Serial.print(CurrentPosition); Serial.println("");
+#if defined SIMPLE_BACKLASH
+    Serial.println("Simple backlash management");
+#elif defined OUTWARD_BACKLASH
+    Serial.println("Outward backlash management");
+#else
+    Serial.println("No backlash management");
+#endif
   }
 
   // read dustcap position as closed position - won't work of course, needs eeprom
@@ -410,12 +434,13 @@ void loop()
         CurrentPosition = stepper.currentPosition();
         stepper.enableOutputs();
 
-        if(debug)
+        /*if(debug)
         {
           snprintf(tempString, sizeof(tempString), "C%04X T%04X B%+02d",(int)CurrentPosition,(int)TargetPosition,(int)Backlash);
           Serial.println(tempString);
-        }
-        
+        }*/
+
+#if defined(SIMPLE_BACKLASH)
         // If switching direction, add backlash to compensate for the next move
         if((CurrentPosition < TargetPosition && 0 < Backlash)||(TargetPosition < CurrentPosition && Backlash < 0))
           TargetPosition += Backlash;
@@ -426,10 +451,16 @@ void loop()
           Backlash = BACKLASH_FNTP;
         else
           Backlash = 0;
+#elif defined(OUTWARD_BACKLASH)
+        // If going inwards, offset requested position by backlash, and plan for additional backlash that will be applied outwards
+        // If going outwards, use requested position unmodified, backlash is assumed handled by a prior move
+        Backlash = WILL_GO_INWARDS(CurrentPosition, TargetPosition) ? 2*BACKLASH_FNTP : 0;
+        TargetPosition = INWARDS_BY(TargetPosition, Backlash);
+#endif
 
         if(debug)
         {
-          snprintf(tempString, sizeof(tempString), "C%04X T%04X B%+02d",(int)CurrentPosition,(int)TargetPosition,(int)Backlash);
+          snprintf(tempString, sizeof(tempString), "FG: C%04X T%04X B%+02d",(int)CurrentPosition,(int)TargetPosition,(int)Backlash);
           Serial.println(tempString);
         }
 
@@ -443,6 +474,7 @@ void loop()
     // stepper.stop() stops motor gracefully, as a result motor may continue running for sometime (upto 1000 step at max speed setting), depending the current speed.
     // if we stop the motor abruptly then somehow stepper library does not handle current/target position correctly.
     if (!strcasecmp(cmd, "FQ")) {
+      // FIXME: manage backlash
       stepper.stop();
       dustcap.stop();
     }
@@ -537,9 +569,9 @@ void loop()
       Serial.print("#");
     }
 
-    // firmware value, always return "10"
+    // firmware value
     if (!strcasecmp(cmd, "GV")) {
-      Serial.print("10#");
+      Serial.print("11#");
     }
 
     // set the temperature coefficient
@@ -741,6 +773,17 @@ void loop()
       lastprint = now;
     }
   }
+#if defined(OUTWARD_BACKLASH)
+  // If motor is not moving but we need to apply backlash
+  else if(Backlash != 0)
+  {
+    CurrentPosition = stepper.currentPosition();
+    TargetPosition = OUTWARDS_BY(CurrentPosition, Backlash);
+    stepper.enableOutputs();
+    stepper.moveTo(TargetPosition);
+    Backlash = 0;
+  }
+#endif
   // if motor is not moving
   else
   {
@@ -1062,4 +1105,3 @@ void outputDebugInfo()
   if (!BUT_MOVEMENT_ENABLED) Serial.print("(disabled) ");
   Serial.println(digitalRead(PIN_INPUT_BUT_BW));
 }
-
