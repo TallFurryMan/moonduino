@@ -43,6 +43,7 @@
 
 // Speed per "SD" unit
 #define                SPEEDMULT 30                        // base unit of stepper speed
+#define                SPEEDMAX  480
 
 #define                TEMPSENSOR_ARRAY_SIZE 30            // array to track temperature history and to scalculate average temperatures
 #define                TEMPERATURE_DEFAULT 25              // default temperature
@@ -118,16 +119,19 @@ boolean                isRunning = false;
 long                   MaxSteps = 25000;
 long                   MinSteps = 0;
 
-long                   dustcapClosedPosition = 0;
-long                   dustcapOpenedPosition = 0;
+long                   DustcapCurrentPosition = 5000;
+long                   DustcapCurrentState = 0; // 0=OPEN/UNPARKED 1=CLOSED/PARKED 2=UNKNOWN
+long                   dustcapClosedPosition = 5000;
+long                   dustcapOpenedPosition = 5500;
 
 ///////////////////////////
 // Speed multipler
 ///////////////////////////
 
 // multiplier of SPEEDMUX, currently max speed is 480.
-int                    SpeedFactor = 16;
-int                    SpeedFactorRaw = 2;
+int                    SpeedFactor = 2;
+int                    SpeedFactorRaw = 16;
+
 
 ///////////////////////////
 // Temperature Compensation
@@ -217,9 +221,15 @@ unsigned long                   millisButBWPressed = 0;
 // EEPROM interface
 ///////////////////////////
 
+// TODO: Checksum!
 #define                EEPROM_POS_LOC 0
-long                   lastSavedPosition = 0;
+long                   lastSavedPosition = -1;
 #define                EEPROM_POS_BACKLASH 8
+#define                EEPROM_DUSTPOS_LOC 16
+long                   lastDustcapSavedPosition = -1;
+#define                EEPROM_DUSTPOS_STATE 24
+#define                EEPROM_POS_SPEED 32
+long                   lastSpeedFactor = -1;
 
 ///////////////////////////
 // LED signals
@@ -313,7 +323,7 @@ void setup()
 
   // initalize dustcap motor
   dustcap.setMaxSpeed(200);
-  dustcap.setAcceleration(100);
+  dustcap.setAcceleration(20);
   millisLastDustcapMove = millis();
 
   // initialize serial command
@@ -326,6 +336,25 @@ void setup()
   EEPROM.get(EEPROM_POS_BACKLASH, Backlash);
   if(Backlash!=BACKLASH_FNTP||Backlash!=BACKLASH_FPTN||Backlash!=0)
     Backlash = 0;
+  EEPROM.get(EEPROM_DUSTPOS_LOC, DustcapCurrentPosition);
+  dustcap.setCurrentPosition(DustcapCurrentPosition);
+  lastDustcapSavedPosition = DustcapCurrentPosition;
+  EEPROM.get(EEPROM_DUSTPOS_STATE, DustcapCurrentState);
+  EEPROM.get(EEPROM_POS_SPEED, SpeedFactor);
+  switch (SpeedFactor)
+  {
+    case 1:
+    case 2:
+    case 4:
+    case 8:
+    case 16:
+    case 32:
+      break;
+    default:
+      SpeedFactor = 2;
+  }
+  SpeedFactorRaw = 32 / SpeedFactor;
+  lastSpeedFactor = SpeedFactor;
 
   if(debug)
   {
@@ -339,9 +368,17 @@ void setup()
 #endif
   }
 
-  // read dustcap position as closed position - won't work of course, needs eeprom
-  dustcapClosedPosition = dustcap.currentPosition();
-  dustcapOpenedPosition = dustcapClosedPosition + 1000;
+  // read dustcap position as closed position
+  if (0 == DustcapCurrentState) // OPEN/UNPARKED
+  {
+    dustcapOpenedPosition = dustcap.currentPosition();
+    dustcapClosedPosition = dustcapOpenedPosition - 500;
+  }
+  else if (1 == DustcapCurrentState) // CLOSED/PARKED
+  {
+    dustcapClosedPosition = dustcap.currentPosition();
+    dustcapOpenedPosition = dustcapClosedPosition + 500;
+  }
 
   if(debug)
   {
@@ -400,7 +437,7 @@ void loop()
     }
 
     // toggle debug on/off
-    if (!strcasecmp(cmd, "D")) {
+    if (!strcasecmp(cmd, "d")) {
       debug = !debug;
       if(debug)
       {
@@ -410,16 +447,20 @@ void loop()
 
     // OUT-OF-SPEC: Dustcap control
     if(!strcasecmp(cmd, "DC")) {
-      long const doOpen = hexstr2long(param);      
-      if(2 == doOpen)
+      long const req = hexstr2long(param);
+      long const pos = dustcap.currentPosition();
+      if(2 == req)
       {
-        snprintf(tempString, sizeof(tempString), "%04X#", (int)0);
+        snprintf(tempString, sizeof(tempString), "%X#", (int) pos == dustcapClosedPosition ? 0 : pos == dustcapOpenedPosition ? 1 : 2);
         Serial.print(tempString);
       }
-      else if(1 == doOpen && dustcap.currentPosition() == dustcapClosedPosition) {
+      else if(0 == req && dustcap.currentPosition() < dustcapOpenedPosition)
+      {
         dustcap.enableOutputs();
         dustcap.moveTo(dustcapOpenedPosition);
-      } else if(0 == doOpen && dustcap.currentPosition() == dustcapOpenedPosition) {
+      }
+      else if(1 == req && dustcap.currentPosition() > dustcapClosedPosition)
+      {
         dustcap.enableOutputs();
         dustcap.moveTo(dustcapClosedPosition);
       }
@@ -487,7 +528,7 @@ void loop()
       Serial.print("#");
     }
 
-    // get the current motor speed, only values of 02, 04, 08, 10, 20, which is set by SD
+    // get the current motor speed, only values of 0x02/04/08/10/20, which is set by SD
     if (!strcasecmp(cmd, "GD")) {
       //char tempString[6];
       sprintf(tempString, "%02X", SpeedFactorRaw);
@@ -524,9 +565,9 @@ void loop()
       //char tempString[6];
       if (MoonliteMode)
         // compatability mode, 0.5 percent resolution
-        sprintf(tempString, "%04X", (int)(TempSensor_Reading/0.5));
+        sprintf(tempString, "%04X", (int)(HumiSensor_Reading/0.5));
       // else 0.125 percent resolution
-      else sprintf(tempString, "%04X", (int)(TempSensor_Reading/0.125));
+      else sprintf(tempString, "%04X", (int)(HumiSensor_Reading/0.125));
       Serial.print(tempString);
       Serial.print("#");
     }
@@ -571,7 +612,7 @@ void loop()
 
     // firmware value
     if (!strcasecmp(cmd, "GV")) {
-      Serial.print("11#");
+      Serial.print("12#");
     }
 
     // set the temperature coefficient
@@ -586,7 +627,7 @@ void loop()
       }
     }
 
-    // set speed, only acceptable values are 02, 04, 08, 10, 20
+    // set speed, only acceptable values are 0x02/04/08/10/20
     if (!strcasecmp(cmd, "SD"))
     {
       //char tempString[32];
@@ -596,8 +637,24 @@ void loop()
       param[2] = '\0'; // Clamp parameter, else will end up with << 8
       SpeedFactorRaw = hexstr2long(param);
 
-      // SpeedFactor: smaller value means faster
-      SpeedFactor = 32 / SpeedFactorRaw;
+      if (SpeedFactorRaw >= 32)
+        SpeedFactor = 1;
+      else if (SpeedFactorRaw >= 16)
+        SpeedFactor = 2;
+      else if (SpeedFactorRaw >= 8)
+        SpeedFactor = 4;
+      else if (SpeedFactorRaw >= 4)
+        SpeedFactor = 8;
+      else if (SpeedFactorRaw >= 2)
+        SpeedFactor = 16;
+
+      SpeedFactorRaw = 32 / SpeedFactor;
+
+      if (lastSpeedFactor != SpeedFactor)
+      {
+        EEPROM.put(EEPROM_POS_SPEED, SpeedFactor);
+        lastSpeedFactor = SpeedFactor;
+      }
 
       stepper.setMaxSpeed( SpeedFactor * SPEEDMULT );
     }
@@ -738,19 +795,28 @@ void loop()
   {
     dustcap.run();
     stopDustcapDone = false;
-
-    static unsigned long lastprint = 0;
-    if(debug && now - lastprint > 1000)
-    {
-      outputDebugState('D');
-      lastprint = now;
-    }
   }
   else
   {
-    if (!!stopDustcapDone && now - millisLastDustcapMove > STEPPER_DISABLEDELAY)
+    if (!stopDustcapDone && now - millisLastDustcapMove > STEPPER_DISABLEDELAY)
     {
       dustcap.disableOutputs();
+
+      // Save current location in EEPROM
+      DustcapCurrentPosition = dustcap.currentPosition();
+      if (lastDustcapSavedPosition != DustcapCurrentPosition)
+      {
+        EEPROM.put(EEPROM_DUSTPOS_LOC, DustcapCurrentPosition);
+        lastDustcapSavedPosition = DustcapCurrentPosition;
+
+	if (DustcapCurrentPosition == dustcapOpenedPosition)
+          DustcapCurrentState = 0;
+        else if (DustcapCurrentPosition == dustcapClosedPosition)
+          DustcapCurrentState = 1;
+        else
+          DustcapCurrentState = 2;
+        EEPROM.put(EEPROM_DUSTPOS_STATE, DustcapCurrentState);
+      }
 
       millisLastDustcapMove = now;
       stopDustcapDone = true;
