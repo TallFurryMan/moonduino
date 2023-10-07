@@ -40,6 +40,7 @@
 #include <AccelStepper.h>
 #include <DHT_U.h>
 #include <EEPROM.h>
+#include <avr/wdt.h>
 
 // Speed per "SD" unit
 #define                SPEEDMULT 30                        // base unit of stepper speed
@@ -253,6 +254,8 @@ bool debug = false;
 void setup()
 {
   Serial.begin(9600);
+  if (debug)
+    Serial.println("Moonduino reset.");
 
   pinMode (PIN_INPUT_SENSOR, INPUT);
   //pinMode (PIN_INPUT_BUT_FW, INPUT_PULLUP);
@@ -385,6 +388,8 @@ void setup()
     Serial.print("Dustcap closed position: "); Serial.print(dustcapClosedPosition); Serial.println("");
     Serial.print("Dustcap opened position: "); Serial.print(dustcapOpenedPosition); Serial.println("");
   }
+
+  wdt_enable(WDTO_500MS);
 }
 
 void loop()
@@ -392,15 +397,17 @@ void loop()
   double    Scratch_Double;
   int       Error_Code;
   
-  char tempString[32];
+  char tempString[48];
   memset(tempString,'\0',sizeof(tempString));
+
+  wdt_reset();
 
   if (eoc) {
     // process the command we got
     cmd[0] = cmd[1] = cmd[2] = '\0';
     memset(param, 0, MAXCOMMAND);
 
-    int len = strlen(packet);
+    int len = strnlen(packet, MAXCOMMAND-1);
 
     if (packet[0] == 'C' || packet[0] == '+' || packet[0] == '-')
     {
@@ -408,22 +415,22 @@ void loop()
     }
     else
     {
-      cmd[0] = packet[0];
-      cmd[1] = packet[1];
+      cmd[0] = ('A' <= packet[0] && packet[0] <= 'Z') ? packet[0] : '\0';
+      cmd[1] = ('A' <= packet[1] && packet[1] <= 'Z') ? packet[1] : '\0';
       if (len > 2)
         strncpy(param, packet + 2, len - 2);
     }
 
-    packet[0] = '\0';
-    eoc = false;
-    idx = 0;
-
     if(debug)
     {
-      snprintf(tempString,sizeof(tempString),"Cmd: %.2s - Arg: %.6s",cmd,param);
+      snprintf(tempString,sizeof(tempString),"Pkt: %.8s - Cmd: %.2s - Arg: %.6s",packet,cmd,param);
       Serial.println("");
       Serial.println(tempString);
     }
+
+    memset(packet, 0, len);
+    eoc = false;
+    idx = 0;
 
     // the stand-alone program sends :C# :GB# on startup
     // :C# is a temperature conversion, doesn't require any response
@@ -437,7 +444,7 @@ void loop()
     }
 
     // toggle debug on/off
-    if (!strcasecmp(cmd, "d")) {
+    if (!strcasecmp(cmd, "D")) {
       debug = !debug;
       if(debug)
       {
@@ -454,12 +461,12 @@ void loop()
         snprintf(tempString, sizeof(tempString), "%X#", (int) pos == dustcapClosedPosition ? 0 : pos == dustcapOpenedPosition ? 1 : 2);
         Serial.print(tempString);
       }
-      else if(0 == req && dustcap.currentPosition() < dustcapOpenedPosition)
+      else if(1 == req && dustcap.currentPosition() < dustcapOpenedPosition)
       {
         dustcap.enableOutputs();
         dustcap.moveTo(dustcapOpenedPosition);
       }
-      else if(1 == req && dustcap.currentPosition() > dustcapClosedPosition)
+      else if(0 == req && dustcap.currentPosition() > dustcapClosedPosition)
       {
         dustcap.enableOutputs();
         dustcap.moveTo(dustcapClosedPosition);
@@ -1018,6 +1025,7 @@ void blinkLED ()
     if (blinkTimer >= LEDBLINK_CYCLE - 1)
     {
       blinkTimer = 0;
+      if (debug) outputDebugState(' ');
     }
     else {
       blinkTimer ++;
@@ -1073,6 +1081,8 @@ void blinkLED ()
 void serialEvent () {
   while (Serial.available() && !eoc) {
     inChar = Serial.read();
+    if ((inChar < '0' || '9' < inChar) && (inChar < 'A' || 'Z' < inChar) && '#' != inChar && ':' != inChar)
+      continue;
     if (inChar != '#' && inChar != ':') {
       packet[idx++] = inChar;
       if (idx >= MAXCOMMAND) {
