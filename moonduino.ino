@@ -37,6 +37,8 @@
 //Example 1: :PO02# offset of +1°C
 //Example 2: :POFB# offset of -2.5°C
 
+char allowed[] = ":#DCFGS+-QPYZHINTVOMBXA0123456789d";
+
 #include <AccelStepper.h>
 #include <DHT_U.h>
 #include <EEPROM.h>
@@ -414,13 +416,13 @@ void loop()
         strncpy(param, packet + 2, len - 2);
     }
 
-    packet[0] = '\0';
+    memset(packet, '\0', len);
     eoc = false;
     idx = 0;
 
     if(debug)
     {
-      snprintf(tempString,sizeof(tempString),"Cmd: %.2s - Arg: %.6s",cmd,param);
+      snprintf(tempString,sizeof(tempString),"Cmd: '%2.2s' - Arg: '%6.6s' (%db)",cmd,param,len);
       Serial.println("");
       Serial.println(tempString);
     }
@@ -1073,14 +1075,14 @@ void blinkLED ()
 void serialEvent () {
   while (Serial.available() && !eoc) {
     inChar = Serial.read();
-    if (inChar != '#' && inChar != ':') {
-      packet[idx++] = inChar;
-      if (idx >= MAXCOMMAND) {
-        idx = MAXCOMMAND - 1;
+    if (strchr(allowed, inChar)) {
+      if (inChar != '#' && inChar != ':') {
+        packet[idx++] = inChar;
+        if (idx >= MAXCOMMAND) {
+          idx = MAXCOMMAND - 1;
+        }
       }
-    }
-    else {
-      if (inChar == '#') {
+      else if (inChar == '#') {
         eoc = true;
       }
     }
