@@ -37,6 +37,8 @@
 //Example 1: :PO02# offset of +1°C
 //Example 2: :POFB# offset of -2.5°C
 
+char allowed[] = ":#DCFGS+-QPYZHINTVOMBXA0123456789d";
+
 #include <AccelStepper.h>
 #include <DHT_U.h>
 #include <EEPROM.h>
@@ -397,7 +399,7 @@ void loop()
   double    Scratch_Double;
   int       Error_Code;
   
-  char tempString[48];
+  char tempString[50];
   memset(tempString,'\0',sizeof(tempString));
 
   wdt_reset();
@@ -423,7 +425,7 @@ void loop()
 
     if(debug)
     {
-      snprintf(tempString,sizeof(tempString),"Pkt: %.8s - Cmd: %.2s - Arg: %.6s",packet,cmd,param);
+      snprintf(tempString,sizeof(tempString),"Pkt: '%8.8s' - Cmd: '%2.2s' - Arg: '%6.6s' (%db)",packet,cmd,param,len);
       Serial.println("");
       Serial.println(tempString);
     }
@@ -1081,16 +1083,14 @@ void blinkLED ()
 void serialEvent () {
   while (Serial.available() && !eoc) {
     inChar = Serial.read();
-    if ((inChar < '0' || '9' < inChar) && (inChar < 'A' || 'Z' < inChar) && '#' != inChar && ':' != inChar)
-      continue;
-    if (inChar != '#' && inChar != ':') {
-      packet[idx++] = inChar;
-      if (idx >= MAXCOMMAND) {
-        idx = MAXCOMMAND - 1;
+    if (strchr(allowed, inChar)) {
+      if (inChar != '#' && inChar != ':') {
+        packet[idx++] = inChar;
+        if (idx >= MAXCOMMAND) {
+          idx = MAXCOMMAND - 1;
+        }
       }
-    }
-    else {
-      if (inChar == '#') {
+      else if (inChar == '#') {
         eoc = true;
       }
     }
