@@ -116,7 +116,8 @@ int                    idx = 0;
 
 long                   TargetPosition = 0;
 long                   CurrentPosition = 0;
-boolean                isRunning = false;
+boolean                dustcapIsRunning = false;
+boolean                focuserIsRunning = false;
 // max/min limit when moving focuser manually.
 // Max can be set via serial command YX.
 long                   MaxSteps = 25000;
@@ -177,7 +178,7 @@ int                    TempSensor_Valid_Total;
 // - When motor step is requested to increase, add a positive backlash, then when move is finished, move backwards by the same backlash
 // - When motor step is requested to decrease, move to the requested position
 // This causes the firmware to return P as position when requested to go to position P, and makes sure gear backlash is always outward, preventing slipping
-#define OUTWARD_BACKLASH
+//#define OUTWARD_BACKLASH
 
 #define WILL_GO_INWARDS(current_pos, next_pos) ((current_pos) < (next_pos))
 #define WILL_GO_OUTWARDS(current_pos, next_pos) ((current_pos) > (next_pos))
@@ -321,16 +322,6 @@ void setup()
   millisLastTempSensorRead = millis();
   millisLastTempSensorLatch = millis();
 
-  // initalize motor
-  stepper.setMaxSpeed(SpeedFactor * SPEEDMULT);
-  stepper.setAcceleration(100);
-  millisLastMove = millis();
-
-  // initalize dustcap motor
-  dustcap.setMaxSpeed(200);
-  dustcap.setAcceleration(20);
-  millisLastDustcapMove = millis();
-
   // initialize serial command
   memset(packet, 0, MAXCOMMAND);
 
@@ -360,6 +351,16 @@ void setup()
   }
   SpeedFactorRaw = 32 / SpeedFactor;
   lastSpeedFactor = SpeedFactor;
+
+  // initalize motor
+  stepper.setMaxSpeed(SpeedFactor * SPEEDMULT);
+  stepper.setAcceleration(100);
+  millisLastMove = millis();
+
+  // initalize dustcap motor
+  dustcap.setMaxSpeed(200);
+  dustcap.setAcceleration(20);
+  millisLastDustcapMove = millis();
 
   if(debug)
   {
@@ -446,7 +447,7 @@ void loop()
     }
 
     // toggle debug on/off
-    if (!strcasecmp(cmd, "D")) {
+    else if (!strcasecmp(cmd, "D")) {
       debug = !debug;
       if(debug)
       {
@@ -455,7 +456,7 @@ void loop()
     }
 
     // OUT-OF-SPEC: Dustcap control
-    if(!strcasecmp(cmd, "DC")) {
+    else if(!strcasecmp(cmd, "DC")) {
       long const req = hexstr2long(param);
       long const pos = dustcap.currentPosition();
       if(2 == req)
@@ -476,13 +477,12 @@ void loop()
     }
 
     // initiate a move
-    if (!strcasecmp(cmd, "FG")) {
+    else if (!strcasecmp(cmd, "FG")) {
       // Ignore move when Temp Comp is enabled
       // Need to revisit as there could be MOVE due to filter change
       if (!TempCompEn)
       {
         CurrentPosition = stepper.currentPosition();
-        stepper.enableOutputs();
 
         /*if(debug)
         {
@@ -514,6 +514,7 @@ void loop()
           Serial.println(tempString);
         }
 
+        stepper.enableOutputs();
         stepper.moveTo(TargetPosition);
                 
         if(debug) outputDebugState('>');
@@ -523,14 +524,14 @@ void loop()
     // stop a move
     // stepper.stop() stops motor gracefully, as a result motor may continue running for sometime (upto 1000 step at max speed setting), depending the current speed.
     // if we stop the motor abruptly then somehow stepper library does not handle current/target position correctly.
-    if (!strcasecmp(cmd, "FQ")) {
+    else if (!strcasecmp(cmd, "FQ")) {
       // FIXME: manage backlash
       stepper.stop();
       dustcap.stop();
     }
 
     // get the temperature coefficient which is set by SC
-    if (!strcasecmp(cmd, "GC")) {
+    else if (!strcasecmp(cmd, "GC")) {
       //char tempString[6];
       sprintf(tempString, "%02X", TempCoefficientRaw);
       Serial.print(tempString);
@@ -538,7 +539,7 @@ void loop()
     }
 
     // get the current motor speed, only values of 0x02/04/08/10/20, which is set by SD
-    if (!strcasecmp(cmd, "GD")) {
+    else if (!strcasecmp(cmd, "GD")) {
       //char tempString[6];
       sprintf(tempString, "%02X", SpeedFactorRaw);
       Serial.print(tempString);
@@ -546,13 +547,13 @@ void loop()
     }
 
     // whether half-step is enabled or not, always return "00"
-    if (!strcasecmp(cmd, "GH")) {
+    else if (!strcasecmp(cmd, "GH")) {
       Serial.print("00#");
     }
 
     // motor is moving - 01 if moving, 00 otherwise
-    if (!strcasecmp(cmd, "GI")) {
-      if (isRunning) {
+    else if (!strcasecmp(cmd, "GI")) {
+      if (focuserIsRunning) {
         Serial.print("01#");
       }
       else {
@@ -561,7 +562,7 @@ void loop()
     }
 
     // OUT-OF-SPEC get humidity
-    if (!strcasecmp(cmd, "GM")) {
+    else if (!strcasecmp(cmd, "GM")) {
       // Skip humidity reading when motor is running
       if (stepper.distanceToGo() == 0) {
         if (TempSensor_Present)
@@ -582,7 +583,7 @@ void loop()
     }
 
     // get the new motor position (target) set by SN
-    if (!strcasecmp(cmd, "GN")) {
+    else if (!strcasecmp(cmd, "GN")) {
       //char tempString[6];
       sprintf(tempString, "%04X", TargetPosition);
       Serial.print(tempString);
@@ -590,7 +591,7 @@ void loop()
     }
 
     // get the current motor position
-    if (!strcasecmp(cmd, "GP")) {
+    else if (!strcasecmp(cmd, "GP")) {
       CurrentPosition = stepper.currentPosition();
       //char tempString[6];
       sprintf(tempString, "%04X", CurrentPosition);
@@ -599,7 +600,7 @@ void loop()
     }
 
     // get temperature
-    if (!strcasecmp(cmd, "GT")) {
+    else if (!strcasecmp(cmd, "GT")) {
       // Skip temperature reading when motor is running
       if (stepper.distanceToGo() == 0) {
         if (TempSensor_Present)
@@ -620,12 +621,12 @@ void loop()
     }
 
     // firmware value
-    if (!strcasecmp(cmd, "GV")) {
+    else if (!strcasecmp(cmd, "GV")) {
       Serial.print("12#");
     }
 
     // set the temperature coefficient
-    if (!strcasecmp(cmd, "SC")) {
+    else if (!strcasecmp(cmd, "SC")) {
       TempCoefficientRaw = hexstr2long(param);
       // covert signed 8-bit to signed int
       if ((TempCoefficientRaw & 0x80)) {// negtive
@@ -637,7 +638,7 @@ void loop()
     }
 
     // set speed, only acceptable values are 0x02/04/08/10/20
-    if (!strcasecmp(cmd, "SD"))
+    else if (!strcasecmp(cmd, "SD"))
     {
       //char tempString[32];
       //sprintf(tempString, "%s = 0x%02X = %d = %d", param, SpeedFactorRaw, SpeedFactor, SpeedFactor * SPEEDMULT);
@@ -669,28 +670,28 @@ void loop()
     }
 
     // set full step mode
-    if (!strcasecmp(cmd, "SF")) {
+    else if (!strcasecmp(cmd, "SF")) {
       // do nothing
     }
 
     // set half step mode
-    if (!strcasecmp(cmd, "SH")) {
+    else if (!strcasecmp(cmd, "SH")) {
       // do nothing
     }
 
     // reset compatability mode
-    if (!strcasecmp(cmd, "YM")) {
+    else if (!strcasecmp(cmd, "YM")) {
       MoonliteMode = false;
     }
 
     // set current motor position
-    if (!strcasecmp(cmd, "SP")) {
+    else if (!strcasecmp(cmd, "SP") && !focuserIsRunning) {
       CurrentPosition = hexstr2long(param);
       stepper.setCurrentPosition(CurrentPosition);
     }
 
     // set new motor position
-    if (!strcasecmp(cmd, "SN")) {
+    else if (!strcasecmp(cmd, "SN")) {
       // Ingore move command when Temp Comp is enabled
       if (!TempCompEn) {
         TargetPosition = hexstr2long(param);
@@ -699,7 +700,7 @@ void loop()
     }
 
     // enable TempComp
-    if (!strcasecmp (cmd, "Y+")) {
+    else if (!strcasecmp (cmd, "Y+")) {
       TempCompEn = true;
 
       // Latch current position and average temperature.
@@ -711,11 +712,11 @@ void loop()
     }
 
     // disable TempComp, currently not used
-    if (!strcasecmp (cmd, "Y-")) {
+    else if (!strcasecmp (cmd, "Y-")) {
       TempCompEn = false;
     }
 
-    if (!strcasecmp(cmd, "Z+")) {
+    else if (!strcasecmp(cmd, "Z+")) {
       if (TempCompEn) {
         Serial.print("01#");
       }
@@ -725,24 +726,25 @@ void loop()
     }
 
     // LED backlight value, always return "00"
-    if (!strcasecmp(cmd, "GB")) {
+    else if (!strcasecmp(cmd, "GB")) {
       Serial.print("00#");
     }
 
     // home the motor, hard-coded, ignore parameters since we only have one motor
-    if (!strcasecmp(cmd, "PH")) {
+    else if (!strcasecmp(cmd, "PH") && !focuserIsRunning) {
       stepper.setCurrentPosition(8000);
+      stepper.enableOutputs();
       stepper.moveTo(0);
-      isRunning = true;
+      //focuserIsRunning = true;
     }
 
     // set backlash
-    if (!strcasecmp(cmd, "YB")) {
+    else if (!strcasecmp(cmd, "YB")) {
       Backlash = hexstr2long(param);
     }
 
     // get backlash set by YB
-    if (!strcasecmp(cmd, "ZB")) {
+    else if (!strcasecmp(cmd, "ZB")) {
       //char tempString[6];
       sprintf(tempString, "%02X", Backlash);
       Serial.print(tempString);
@@ -750,31 +752,31 @@ void loop()
     }
 
     // set TempComp threshold in unit of 0.25 degree
-    if (!strcasecmp(cmd, "YT")) {
+    else if (!strcasecmp(cmd, "YT")) {
       TempCompThresholdRaw = hexstr2long(param);
       TempCompThreshold = (float)TempCompThresholdRaw / 4; // covert to degree
     }
 
     // get TempComp threshold set by YT
-    if (!strcasecmp(cmd, "ZT")) {
+    else if (!strcasecmp(cmd, "ZT")) {
       //char tempString[6];
       sprintf(tempString, "%02X", TempCompThresholdRaw);
       Serial.print(tempString);
       Serial.print("#");
     }
 
-    if (!strcasecmp(cmd, "YX")) {
+    else if (!strcasecmp(cmd, "YX")) {
       MaxSteps = hexstr2long(param);
     }
 
-    if (!strcasecmp(cmd, "ZX")) {
+    else if (!strcasecmp(cmd, "ZX")) {
       //char tempString[6];
       sprintf(tempString, "%04X", MaxSteps);
       Serial.print(tempString);
       Serial.print("#");
     }
 
-    if (!strcasecmp(cmd, "ZA")) {
+    else if (!strcasecmp(cmd, "ZA")) {
       int TempInt;
       TempInt = (int)(TempSensor_Average * 100);
       if (TempInt >= 0) {
@@ -791,18 +793,19 @@ void loop()
     }
 
     // Debug Info
-    if (!strcasecmp(cmd, "SS"))
+    else if (!strcasecmp(cmd, "SS")) {
       if(debug) outputDebugInfo();
+    }
   }
 
   unsigned long now = millis();
 
-  isRunning = dustcap.targetPosition() != dustcap.currentPosition();
+  dustcapIsRunning = dustcap.run(); // dustcap.targetPosition() != dustcap.currentPosition();
 
   static bool stopDustcapDone = false;
-  if (isRunning)
+  if (dustcapIsRunning)
   {
-    dustcap.run();
+    //dustcap.run();
     stopDustcapDone = false;
   }
   else
@@ -832,13 +835,12 @@ void loop()
     }
   }
 
-  isRunning = stepper.targetPosition() != stepper.currentPosition();
+  focuserIsRunning = stepper.run(); // stepper.targetPosition() != stepper.currentPosition();
 
-  // move motor if not done
   static bool stopStepperDone = false;
-  if (isRunning)
+  if (focuserIsRunning)
   {
-    stepper.run();
+    //stepper.run();
     stopStepperDone = false;
 
     static unsigned long lastprint = 0;
