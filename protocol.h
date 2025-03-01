@@ -1,3 +1,12 @@
+#ifndef PROTOCOL_H
+#define PROTOCOL_H  
+
+#include "defs.h"
+#include "debug.h"
+#include "focuser.h"
+#include "dustcap.h"
+
+
 //: D #             N/A         Toggle debugging on/off for the Arduino IDE
 //:	C	#	 	 	 	 	 	 	N/A	        Initiate a temperature conversion; the conversion process takes a maximum of 750 milliseconds. The value returned by the :GT# command will not be valid until the conversion process completes.
 //:	F	G	#	 	 	 	 	 	N/A	        Go to the new position as set by the ":SNYYYY#" command.
@@ -33,35 +42,17 @@
 //Example 1: :PO02# offset of +1°C
 //Example 2: :POFB# offset of -2.5°C
 
-char allowed[] = ":#DCFGS+-QPYZHINTVOMBXA0123456789d";
-
-char version = "13#";
-
-///////////////////////////
-// Serial Interface Signals
-///////////////////////////
-
 #define MAXCOMMAND 8
-char                   inChar = 0;
-char                   cmd[MAXCOMMAND];
-char                   param[MAXCOMMAND];
-char                   packet[MAXCOMMAND];
-boolean                eoc = false;
-int                    idx = 0;
+inline void protocol_reply(char const * s) { Serial.print(s); Serial.print("#"); }
 
-void protocol_setup()
+extern void protocol_setup();
+extern bool protocol_next_command();
+extern void protocol_parse();
+
+inline void protocol_run()
 {
-  Serial.begin(9600);
-  if (debug_active())
-  {
-    delay(5000);
-    Serial.print("Moonduino '");
-    Serial.print(version);
-    Serial.println("' booting...");
-  }
-
-  // initialize serial command
-  memset(packet, 0, sizeof(packet));
-  memset(cmd, 0, sizeof(cmd));
-  memset(param, 0, sizeof(param));
+  if (protocol_next_command())
+    protocol_parse();
 }
+
+#endif // PROTOCOL_H

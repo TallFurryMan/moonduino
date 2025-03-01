@@ -1,3 +1,6 @@
+#ifndef EEPROM_H
+#define EEPROM_H
+
 #include <EEPROM.h>
 
 #define                EEPROM_POS_LOC 0
@@ -6,7 +9,8 @@
 #define                EEPROM_DUSTPOS_STATE 24
 #define                EEPROM_POS_SPEED 32
 
-void eeprom_setup()
+inline void eeprom_setup()
 {
 }
 
+#endif // EEPROM_H

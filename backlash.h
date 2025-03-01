@@ -1,9 +1,4 @@
-// Backlash to be used on next change of direction - long for eeprom
-long                   Backlash = 0; // [FPTN,FNTP]
-#define                BACKLASH_FNTP (+11)
-#define                BACKLASH_FPTN (-11)
+#ifndef BACKLASH_H
+#define BACKLASH_H
 
-//#define                DIRUP false
-//#define                DIRDOWN true
-
-
+#endif // BACKLASH_H
