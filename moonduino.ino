@@ -185,6 +185,10 @@ int                    TempSensor_Valid_Total;
 #define INWARDS_BY(pos, offset) ((pos)+(offset))
 #define OUTWARDS_BY(pos, offset) ((pos)-(offset))
 
+#define INWARDS  (-1)
+#define OUTWARDS (+1)
+int direction = INWARDS;
+
 // Backlash to be used on next change of direction - long for eeprom
 long                   Backlash = 0; // [FPTN,FNTP]
 #define                BACKLASH_FNTP (+11)
@@ -514,8 +518,13 @@ void loop()
           Serial.println(tempString);
         }
 
-        stepper.enableOutputs();
-        stepper.moveTo(TargetPosition);
+	if(CurrentPosition != TargetPosition)
+        {
+          stepper.enableOutputs();
+          stepper.moveTo(TargetPosition);
+
+          direction = (CurrentPosition > TargetPosition) ? INWARDS : OUTWARDS;
+        }
                 
         if(debug) outputDebugState('>');
       }
@@ -835,7 +844,13 @@ void loop()
     }
   }
 
-  focuserIsRunning = stepper.run(); // stepper.targetPosition() != stepper.currentPosition();
+  if ( (INWARDS  == direction && stepper.targetPosition() < stepper.currentPosition()) ||
+       (OUTWARDS == direction && stepper.targetPosition() > stepper.currentPosition()) )
+  {
+    focuserIsRunning = stepper.run(); // stepper.targetPosition() != stepper.currentPosition();
+  }
+  else focuserIsRunning = false;
+
 
   static bool stopStepperDone = false;
   if (focuserIsRunning)
