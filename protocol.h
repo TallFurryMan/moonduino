@@ -42,7 +42,7 @@ char version = "13#";
 ///////////////////////////
 
 #define MAXCOMMAND 8
-char                   inChar;
+char                   inChar = 0;
 char                   cmd[MAXCOMMAND];
 char                   param[MAXCOMMAND];
 char                   packet[MAXCOMMAND];
@@ -59,4 +59,9 @@ void protocol_setup()
     Serial.print(version);
     Serial.println("' booting...");
   }
+
+  // initialize serial command
+  memset(packet, 0, sizeof(packet));
+  memset(cmd, 0, sizeof(cmd));
+  memset(param, 0, sizeof(param));
 }

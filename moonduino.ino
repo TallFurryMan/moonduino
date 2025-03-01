@@ -2,253 +2,21 @@
 //
 // Uses AccelStepper (http://www.airspayce.com/mikem/arduino/AccelStepper/)
 //1	2	3	4	5	6	7	8
-//: D #             N/A         Toggle debugging on/off for the Arduino IDE
-//:	C	#	 	 	 	 	 	 	N/A	        Initiate a temperature conversion; the conversion process takes a maximum of 750 milliseconds. The value returned by the :GT# command will not be valid until the conversion process completes.
-//:	F	G	#	 	 	 	 	 	N/A	        Go to the new position as set by the ":SNYYYY#" command.
-//:	F	Q	#	 	 	 	 	 	N/A	        Immediately stop any focus motor movement.
-//:	G	C	#	 	 	 	 	 	XX#	        Returns the temperature coefficient where XX is a two-digit signed (2’s complement) hex number.
-//:	G	D	#	 	 	 	 	 	XX#	        Returns the current stepping delay where XX is a two-digit unsigned hex number. See the :SD# command for a list of possible return values.
-//:	G	H	#	 	 	 	 	 	00# OR FF#	Returns "FF#" if the focus motor is half-stepped otherwise return "00#"
-//:	G	I	#	 	 	 	 	 	00# OR 01#	Returns "00#" if the focus motor is not moving, otherwise return "01#"
-//:	G	N	#	 	 	 	 	 	YYYY#	        Returns the new position previously set by a ":SNYYYY" command where YYYY is a four-digit unsigned hex number.
-//:	G	P	#	 	 	 	 	 	YYYY#	        Returns the current position where YYYY is a four-digit unsigned hex number.
-//:	G	T	#	 	 	 	 	 	YYYY#	        Returns the current temperature where YYYY is a four-digit signed (2’s complement) hex number.
-//:	G	V	#	 	 	 	 	 	DD#	        Get the version of the firmware as a two-digit decimal number where the first digit is the major version number, and the second digit is the minor version number.
-//:	S	C	X	X	#	 	 	 	N/A	        Set the new temperature coefficient where XX is a two-digit, signed (2’s complement) hex number.
-//:	S	D	X	X	#	 	 	 	N/A	        Set the new stepping delay where XX is a two-digit, unsigned hex number. Valid values to send are 02, 04, 08, 10 and 20, which correspond to a stepping delay of 250, 125, 63, 32 and 16 steps per second respectively.
-//:	S	F	#	 	 	 	 	 	N/A	        Set full-step mode.
-//:	S	H	#	 	 	 	 	 	N/A	        Set half-step mode.
-//:	S	N	Y	Y	Y	Y	#	 	N/A	        Set the new position where YYYY is a four-digit unsigned hex number.
-//:	S	P	Y	Y	Y	Y	#	 	N/A	        Set the current position where YYYY is a four-digit unsigned hex number.
-//:	+	#	 	 	 	 	 	 	N/A	        Activate temperature compensation focusing.
-//:	-	#	 	 	 	 	 	 	N/A	        Disable temperature compensation focusing.
-//:	P	O	X	X	#	 	 	 	N/A	        Temperature calibration offset, XX is a two-digit signed hex number, in half degree increments.
-//:     Y       M       #                                               N/A             Enhance temperature reading (0.125 degree)
-//:     Y       B       X       X       #                               N/A             Set backlash where XX is a two-digit unsigned hex number
-//:     Z       B       #                                               XX#             Get backlash
-//:     Y       T       Y       Y       Y       Y       #               N/A             Set max steps where YYYY is a four-digit unsigned hex number
-//:     Z       T       #                                               YYYY#           Get max steps
-//:     Y       X       X       X       #                               N/A             Set TempComp threshold where XX is a two-digit unsigned hex number in unit of 0.25 degree
-//:     Z       X       #                                               XX#             Get TempComp threshold
-//:	Y       +	#	 	 	 	 	 	N/A	        Activate temperature compensation focusing.
-//:	Y       -	#	 	 	 	 	 	N/A	        Disable temperature compensation focusing.
-//:	Z       +	#	 	 	 	 	 	00 or 01#       Get temperature compensation.
-//:	Z	A	#	 	 	 	 	 	YYYY#	        Returns the average temperature * 100 where YYYY is a four-digit signed (2’s complement) hex number.
-//Example 1: :PO02# offset of +1°C
-//Example 2: :POFB# offset of -2.5°C
-
-char allowed[] = ":#DCFGS+-QPYZHINTVOMBXA0123456789d";
-
 #include <AccelStepper.h>
-#include <DHT_U.h>
-#include <EEPROM.h>
 #include <avr/wdt.h>
 
 // Speed per "SD" unit
 #define                SPEEDMULT 30                        // base unit of stepper speed
 #define                SPEEDMAX  480
 
-#define                TEMPSENSOR_ARRAY_SIZE 30            // array to track temperature history and to scalculate average temperatures
-#define                TEMPERATURE_DEFAULT 25              // default temperature
-#define                HUMIDITY_DEFAULT 25                 // default humidity
-
-#define                TEMPCOMP_THRESHOLD 1                // Temperature change threshold to trigger TempComp movement since last TempComp
-#define                TEMPCOMP_HYSTERESIS 1               // Hysteresis to report error, without moving focuser ???
-#define                TEMPCOMP_MOVEDELAY 2000             // DELAY between 2 steps druing TempComp move
-#define                STEPPER_DISABLEDELAY 5000           // DELAY to disable output driver after last move
-#define                TEMPSENSOR_READDELAY 5000           // Temperature sensor read interval if driver does not poll
-#define                TEMPSENSOR_SAMPLEDELAY 5000         // Temperature sample interval to calculate average temperature. For 30 samples at 5s interval will average out temperature in last 150s.
-
-#define                PIN_OUTPUT_MOTOR1 2                 // Motor pins
-#define                PIN_OUTPUT_MOTOR2 3
-#define                PIN_OUTPUT_MOTOR3 4
-#define                PIN_OUTPUT_MOTOR4 5
-#define                PIN_OUTPUT_DUSTCAP1 6               // Dustcap motor pins
-#define                PIN_OUTPUT_DUSTCAP2 7
-#define                PIN_OUTPUT_DUSTCAP3 8
-#define                PIN_OUTPUT_DUSTCAP4 9
-#define                PIN_INPUT_SENSOR 10                 // Tempeature sensors
-#define                PIN_INPUT_BUT_FW 11                  // Maunal movement button
-#define                PIN_INPUT_BUT_BW 12
-//#define                PIN_INPUT_POTENTION 11              // Analog input
-#define                PIN_OUTPUT_STATUS 13                // To report error when temperature has gone up over hysteresis threshold when TempComp is on.
-
-#define                LEDBLINK_INTERVAL   250             // 250ms
-#define                LEDBLINK_CYCLE      16              // 16*250 = 4s
-///////////////////////////
-// Stepper
-///////////////////////////
-
-// ULN2003 requires IN1-IN3-IN2-IN4
-AccelStepper           stepper(AccelStepper::FULL4WIRE, PIN_OUTPUT_MOTOR1, PIN_OUTPUT_MOTOR3, PIN_OUTPUT_MOTOR2, PIN_OUTPUT_MOTOR4, false);
-AccelStepper           dustcap(AccelStepper::FULL4WIRE, PIN_OUTPUT_DUSTCAP1, PIN_OUTPUT_DUSTCAP3, PIN_OUTPUT_DUSTCAP2, PIN_OUTPUT_DUSTCAP4, false);
-
-///////////////////////////
-// Temperature Sensor
-///////////////////////////
-
-DHT_Unified TempSensor(PIN_INPUT_SENSOR, DHT22);
-
-///////////////////////////
-// Temperature Signals
-///////////////////////////
-
-boolean                TempSensor_Present = false;                              // DHT22 present
-float                  TempSensor_Reading = TEMPERATURE_DEFAULT;                // temperature reading from sensor
-int16_t                TempSensor_Raw = 0;                                      // Raw temperature returned to the driver
-float                  HumiSensor_Reading = HUMIDITY_DEFAULT;
-
-///////////////////////////
-// Serial Interface Signals
-///////////////////////////
-
-#define MAXCOMMAND 8
-char                   inChar;
-char                   cmd[MAXCOMMAND];
-char                   param[MAXCOMMAND];
-char                   packet[MAXCOMMAND];
-boolean                eoc = false;
-int                    idx = 0;
-
-///////////////////////////
-// Motor Control Signals
-///////////////////////////
-
-long                   TargetPosition = 0;
-long                   CurrentPosition = 0;
-boolean                dustcapIsRunning = false;
-boolean                focuserIsRunning = false;
-// max/min limit when moving focuser manually.
-// Max can be set via serial command YX.
-long                   MaxSteps = 25000;
-long                   MinSteps = 0;
-
-long                   DustcapCurrentPosition = 5000;
-long                   DustcapCurrentState = 0; // 0=OPEN/UNPARKED 1=CLOSED/PARKED 2=UNKNOWN
-long                   dustcapClosedPosition = 5000;
-long                   dustcapOpenedPosition = 5500;
-
-///////////////////////////
-// Speed multipler
-///////////////////////////
-
-// multiplier of SPEEDMUX, currently max speed is 480.
-int                    SpeedFactor = 2;
-int                    SpeedFactorRaw = 16;
-
-
-///////////////////////////
-// Temperature Compensation
-///////////////////////////
-
-// TemoComp coefficient is signed integer
-int                    TempCoefficientRaw = 1;
-int                    TempCoefficient = 1;
-
-// TemmpComp temperature drop threshold to trigger TempComp.
-// NOW temperature increase does not trigger TempComp, instead it will be reported as ERROR.
-float                  TempCompThreshold = TEMPCOMP_THRESHOLD;
-int                    TempCompThresholdRaw = 0;
-
-boolean                TempCompEn = false;
-
-boolean                TempCompError = false;
-
-// TempComp original position and temeprature.
-// this is to avoid losing steps, eg Coefficient*Threshold < 1, so it will not move if we only keep track of the different between 2 "regions".
-// so we need to use the original temperature and position to calculate the "supposed to be" target position.
-float                  TempCompOriginalTemperature = TEMPERATURE_DEFAULT;
-long                   TempCompOriginalPosition = 0;
-long                   TempCompTargetPosition = 0;
-float                  TempCompLastTemperature = TEMPERATURE_DEFAULT;
-
-float                  TempSensor_Array[TEMPSENSOR_ARRAY_SIZE];
-float                  TempSensor_Array_Total = 0;
-float                  TempSensor_Average = TEMPERATURE_DEFAULT;
-boolean                TempSensor_Valid_Array[TEMPSENSOR_ARRAY_SIZE];
-int                    TempSensor_Valid_Total;
-
-// Simple backlash management
-// - When motor step was decreasing, and is now increasing, apply a positive backlash
-// - When motor step was increasing, and is now decreasing, apply a negative backlash
-// This causes the firmware to return P+/-backlash as position when requested to go to position P
-// #define SIMPLE_BLACKLASH
-
-// Outward backlash management (idea by Richard Beck on indilib.org)
-// - When motor step is requested to increase, add a positive backlash, then when move is finished, move backwards by the same backlash
-// - When motor step is requested to decrease, move to the requested position
-// This causes the firmware to return P as position when requested to go to position P, and makes sure gear backlash is always outward, preventing slipping
-//#define OUTWARD_BACKLASH
-
-#define WILL_GO_INWARDS(current_pos, next_pos) ((current_pos) < (next_pos))
-#define WILL_GO_OUTWARDS(current_pos, next_pos) ((current_pos) > (next_pos))
-#define INWARDS_BY(pos, offset) ((pos)+(offset))
-#define OUTWARDS_BY(pos, offset) ((pos)-(offset))
-
-#define INWARDS  (-1)
-#define OUTWARDS (+1)
-int direction = INWARDS;
-
-// Backlash to be used on next change of direction - long for eeprom
-long                   Backlash = 0; // [FPTN,FNTP]
-#define                BACKLASH_FNTP (+11)
-#define                BACKLASH_FPTN (-11)
-
-//#define                DIRUP false
-//#define                DIRDOWN true
 
 //bool                   TempCompLastDir = DIRDOWN;
 ///////////////////////////
 // Timer
 ///////////////////////////
 
-unsigned long                   millisLastMove = 0;                // Last move timer to turn off stepper output
-unsigned long                   millisLastTempSensorLatch = 0;     // Last temperature sample timer
-unsigned long                   millisLastTempSensorRead = 0;      // Last temperature sensor read timer
-unsigned long                   millisLastTempCompMove = 0;        // Last move timer during TempComp
-
-unsigned long                   millisLastDustcapMove = 0;         // Last move timer to turn off stepper output
 
 
-///////////////////////////
-//Manual move control
-///////////////////////////
-
-#define                BUT_MOVEMENT_ENABLED 0
-#define                BUT_READING_RELEASED 0
-#define                BUT_READING_PRESSED 1
-
-//int                    lastReadingButFW = BUT_READING_RELEASED;               //
-//int                    lastReadingButBW = BUT_READING_RELEASED;
-
-// Button press timer to increase motor move steps (ie, effective motor speed).
-unsigned long                   millisButFWPressed = 0;
-unsigned long                   millisButBWPressed = 0;
-
-///////////////////////////
-// EEPROM interface
-///////////////////////////
-
-// TODO: Checksum!
-#define                EEPROM_POS_LOC 0
-long                   lastSavedPosition = -1;
-#define                EEPROM_POS_BACKLASH 8
-#define                EEPROM_DUSTPOS_LOC 16
-long                   lastDustcapSavedPosition = -1;
-#define                EEPROM_DUSTPOS_STATE 24
-#define                EEPROM_POS_SPEED 32
-long                   lastSpeedFactor = -1;
-
-///////////////////////////
-// LED signals
-///////////////////////////
-
-unsigned long                   millisLastLEDBlink = 0;
-int                    blinkTimer = 0;
-
-///////////////////////////
-// Misc signals
-///////////////////////////
 
 // Moonlite compatability mode - 0.5 degree temparture reading accuracy
 // Set to false will return 0.125 accuracy
@@ -256,115 +24,24 @@ boolean                MoonliteMode = true;
 
 int                    i;
 
-bool debug = false;
+#include "debug.h"
+#include "sensors.h"
+#include "backlash.h"
+#include "protocol.h"
+#include "eeprom.h"
+#include "focuser.h"
+#include "dustcap.h"
+#include "compensation.h"
+#include "buttons.h"
 
 void setup()
 {
-  Serial.begin(9600);
-  if (debug)
-    Serial.println("Moonduino reset.");
-
-  pinMode (PIN_INPUT_SENSOR, INPUT);
-  //pinMode (PIN_INPUT_BUT_FW, INPUT_PULLUP);
-  //pinMode (PIN_INPUT_BUT_BW, INPUT_PULLUP);
-  pinMode (PIN_OUTPUT_STATUS, OUTPUT);
-
-  // Initialize temperature array
-  for (i = 0; i < TEMPSENSOR_ARRAY_SIZE; i++)
-  {
-    TempSensor_Array[i] = TEMPERATURE_DEFAULT;
-    TempSensor_Valid_Array[i] = false;
-  }
-
-  // Initialize DHT22 - test temperature readout
-  TempSensor.begin();
-  sensors_event_t t_event;
-  TempSensor.temperature().getEvent(&t_event);
-  TempSensor_Reading = t_event.temperature;
-  TempSensor_Present = !isnan(TempSensor_Reading);
-
-  if (TempSensor_Present and debug)
-  {
-    sensor_t sensor;
-    {
-      TempSensor.temperature().getSensor(&sensor);
-      /*
-      Serial.println("------------------------------------");
-      Serial.println("Temperature");
-      Serial.print ("Sensor: "); Serial.println(sensor.name);
-      Serial.print ("Driver Ver: "); Serial.println(sensor.version);
-      Serial.print ("Unique ID: "); Serial.println(sensor.sensor_id);
-      Serial.print ("Max Value: "); Serial.print(sensor.max_value); Serial.println(" *C");
-      Serial.print ("Min Value: "); Serial.print(sensor.min_value); Serial.println(" *C");
-      Serial.print ("Resolution: "); Serial.print(sensor.resolution); Serial.println(" *C");
-      unsigned long ticks = millis();
-      float v = DHT_getTemperature();
-      ticks = millis() - ticks;
-      Serial.print ("Temperature: "); Serial.print(v); Serial.print(" *C ("); Serial.print(ticks); Serial.println(" ms)");
-      Serial.println("------------------------------------");
-      */
-    }
-    {
-      TempSensor.humidity().getSensor(&sensor);
-      /*
-      Serial.println("Humidity");
-      Serial.print ("Sensor: "); Serial.println(sensor.name);
-      Serial.print ("Driver Ver: "); Serial.println(sensor.version);
-      Serial.print ("Unique ID: "); Serial.println(sensor.sensor_id);
-      Serial.print ("Max Value: "); Serial.print(sensor.max_value); Serial.println(" %");
-      Serial.print ("Min Value: "); Serial.print(sensor.min_value); Serial.println(" %");
-      Serial.print ("Resolution: "); Serial.print(sensor.resolution); Serial.println(" %");
-      unsigned long ticks = millis();
-      float v = DHT_getHumidity();
-      ticks = millis() - ticks;
-      Serial.print ("Humidity: "); Serial.print(v); Serial.print(" % ("); Serial.print(ticks); Serial.println(" ms)");
-      Serial.println("------------------------------------");
-      */
-    }
-  }
-
-  millisLastTempSensorRead = millis();
-  millisLastTempSensorLatch = millis();
-
-  // initialize serial command
-  memset(packet, 0, MAXCOMMAND);
-
-  // read saved position from EEPROM
-  EEPROM.get(EEPROM_POS_LOC, CurrentPosition);
-  stepper.setCurrentPosition(CurrentPosition);
-  lastSavedPosition = CurrentPosition;
-  EEPROM.get(EEPROM_POS_BACKLASH, Backlash);
-  if(Backlash!=BACKLASH_FNTP||Backlash!=BACKLASH_FPTN||Backlash!=0)
-    Backlash = 0;
-  EEPROM.get(EEPROM_DUSTPOS_LOC, DustcapCurrentPosition);
-  dustcap.setCurrentPosition(DustcapCurrentPosition);
-  lastDustcapSavedPosition = DustcapCurrentPosition;
-  EEPROM.get(EEPROM_DUSTPOS_STATE, DustcapCurrentState);
-  EEPROM.get(EEPROM_POS_SPEED, SpeedFactor);
-  switch (SpeedFactor)
-  {
-    case 1:
-    case 2:
-    case 4:
-    case 8:
-    case 16:
-    case 32:
-      break;
-    default:
-      SpeedFactor = 2;
-  }
-  SpeedFactorRaw = 32 / SpeedFactor;
-  lastSpeedFactor = SpeedFactor;
-
-  // initalize motor
-  stepper.setMaxSpeed(SpeedFactor * SPEEDMULT);
-  stepper.setAcceleration(100);
-  millisLastMove = millis();
-
-  // initalize dustcap motor
-  dustcap.setMaxSpeed(200);
-  dustcap.setAcceleration(20);
-  millisLastDustcapMove = millis();
+  debug_setup();
+	protocol_setup();
+  eeprom_setup();
+  sensors_setup();
+  focuser_setup();
+  dustcap_setup();
 
   if(debug)
   {
