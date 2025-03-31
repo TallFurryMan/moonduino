@@ -214,7 +214,7 @@ void protocol_parse()
 
     // firmware value
     else if (!strcasecmp(cmd, "GV")) {
-      protocol_reply("12");
+      protocol_reply("13");
     }
 
     // set the temperature coefficient
