@@ -30,12 +30,6 @@ void setup()
 
 void loop()
 {
-  double    Scratch_Double;
-  int       Error_Code;
-  
-  char tempString[50];
-  memset(tempString,'\0',sizeof(tempString));
-
   wdt_reset();
   now_run();
 

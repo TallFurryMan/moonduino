@@ -2,6 +2,7 @@
 #include "debug.h"
 #include "compensation.h"
 #include "focuser.h"
+#include "backlash.h"
 #include "dustcap.h"
 #include "protocol.h"
 #include "sensors.h"
@@ -137,28 +138,10 @@ void protocol_parse()
       // Need to revisit as there could be MOVE due to filter change
       if (!TempCompEn)
       {
-        CurrentPosition = stepper.currentPosition();
-
-#if defined(SIMPLE_BACKLASH)
-        // If switching direction, add backlash to compensate for the next move
-        if((CurrentPosition < TargetPosition && 0 < Backlash)||(TargetPosition < CurrentPosition && Backlash < 0))
-          TargetPosition += Backlash;
-        // Then, prepare backlash for the next move
-        if(CurrentPosition < TargetPosition)
-          Backlash = BACKLASH_FPTN;
-        else if(TargetPosition < CurrentPosition)
-          Backlash = BACKLASH_FNTP;
-        else
-          Backlash = 0;
-#elif defined(OUTWARD_BACKLASH)
-        // If going inwards, offset requested position by backlash, and plan for additional backlash that will be applied outwards
-        // If going outwards, use requested position unmodified, backlash is assumed handled by a prior move
-        Backlash = WILL_GO_INWARDS(CurrentPosition, TargetPosition) ? 2*BACKLASH_FNTP : 0;
-        TargetPosition = INWARDS_BY(TargetPosition, Backlash);
-#endif
+        focuser_start_moving();
 
         LOG_BEGIN();
-        snprintf(scratchpad, sizeof(scratchpad), "FG: C%04X T%04X B%+02d",(int)CurrentPosition,(int)TargetPosition,(int)Backlash);
+        snprintf(scratchpad, sizeof(scratchpad), "FG: C%04X T%04X B%+02d",(int)focuser_position(),(int)focuser_target(),(int)focuser_next_backlash());
         L1(scratchpad);
         LOG_END();
       }
@@ -175,14 +158,12 @@ void protocol_parse()
 
     // get the temperature coefficient which is set by SC
     else if (!strcasecmp(cmd, "GC")) {
-      //char scratchpad[6];
       sprintf(scratchpad, "%02X", TempCoefficientRaw);
       protocol_reply(scratchpad);
     }
 
     // get the current motor speed, only values of 0x02/04/08/10/20, which is set by SD
     else if (!strcasecmp(cmd, "GD")) {
-      //char scratchpad[6];
       sprintf(scratchpad, "%02X", SpeedFactorRaw);
       protocol_reply(scratchpad);
     }
@@ -194,17 +175,11 @@ void protocol_parse()
 
     // motor is moving - 01 if moving, 00 otherwise
     else if (!strcasecmp(cmd, "GI")) {
-      if (focuser_is_running()) {
-        protocol_reply("01");
-      }
-      else {
-        protocol_reply("00");
-      }
+      protocol_reply(focuser_is_running() ? "01" : "00");
     }
 
     // OUT-OF-SPEC get humidity
     else if (!strcasecmp(cmd, "GM")) {
-      //char scratchpad[6];
       if (focuser_moonlite_mode())
         // compatability mode, 0.5 percent resolution
         sprintf(scratchpad, "%04X", (int)(sensors_humidity()/0.5));
@@ -216,16 +191,13 @@ void protocol_parse()
 
     // get the new motor position (target) set by SN
     else if (!strcasecmp(cmd, "GN")) {
-      //char scratchpad[6];
-      sprintf(scratchpad, "%04X", TargetPosition);
+      sprintf(scratchpad, "%04X", focuser_target());
       protocol_reply(scratchpad);
     }
 
     // get the current motor position
     else if (!strcasecmp(cmd, "GP")) {
-      CurrentPosition = stepper.currentPosition();
-      //char scratchpad[6];
-      sprintf(scratchpad, "%04X", CurrentPosition);
+      sprintf(scratchpad, "%04X", focuser_position());
       protocol_reply(scratchpad);
     }
 
@@ -305,14 +277,13 @@ void protocol_parse()
     }
 
     // set current motor position
-    else if (!strcasecmp(cmd, "SP") && strlen(param) == 4 && !focuser_is_running()) {
-      TargetPosition = CurrentPosition = focuser_clamp_position(hexstr2long(param));
-      stepper.setCurrentPosition(CurrentPosition);
+    else if (!strcasecmp(cmd, "SP") && strlen(param) == 4) {
+      focuser_sync(hexstr2long(param));
     }
 
     // set new motor position - we allow command even if motor is running, but not if compensating
     else if (!strcasecmp(cmd, "SN") && strlen(param) == 4 && !TempCompEn) {
-      TargetPosition = focuser_clamp_position(hexstr2long(param));
+      focuser_prepare_move_to(hexstr2long(param));
     }
 
     // enable TempComp
@@ -351,18 +322,16 @@ void protocol_parse()
       stepper.setCurrentPosition(8000);
       stepper.enableOutputs();
       stepper.moveTo(0);
-      //focuserIsRunning = true;
     }
 
     // set backlash
     else if (!strcasecmp(cmd, "YB") && strlen(param) == 2) {
-      Backlash = hexstr2long(param);
+      focuser_set_backlash(hexstr2long(param));
     }
 
     // get backlash set by YB
     else if (!strcasecmp(cmd, "ZB")) {
-      //char scratchpad[6];
-      sprintf(scratchpad, "%02X", Backlash);
+      sprintf(scratchpad, "%02X", focuser_backlash());
       protocol_reply(scratchpad);
     }
 
@@ -374,7 +343,6 @@ void protocol_parse()
 
     // get TempComp threshold set by YT
     else if (!strcasecmp(cmd, "ZT")) {
-      //char scratchpad[6];
       sprintf(scratchpad, "%02X", TempCompThresholdRaw);
       protocol_reply(scratchpad);
     }

@@ -1,5 +1,6 @@
 #include "defs.h"
 #include "focuser.h"
+#include "backlash.h"
 #include "dustcap.h"
 #include "sensors.h"
 #include "compensation.h"
@@ -7,7 +8,7 @@
 #include "debug.h"
 
 char scratchpad[128];
-bool debug = true; //false;
+bool debug = false;
 
 timestamp_t millisLastLEDBlink = 0;
 int blinkTimer = 0;
@@ -88,13 +89,13 @@ void blinkLED ()
 
 void outputDebugState(char action)
 {
-  snprintf(scratchpad, sizeof(scratchpad), "%08ld: %03d.%02d*C %03d.%02d%% %04X (%05d) - %04X (%05d) (B%+02d) = %04X @ %06d ; %04X - %04Xd = %04X @ %06d %c",
+  snprintf(scratchpad, sizeof(scratchpad), "%08ld: %03d.%02d*C %03d.%02d%% ; %04X (%05d) -> %04X (%05d) (B%+02d) = %04X @ %06d ; %04X - %04Xd = %04X @ %06d %c",
     now(),
     (int)sensors_temperature(), (int)(sensors_temperature()*100)%100,
     (int)sensors_humidity(), (int)(sensors_humidity()*100)%100,
-    (int)stepper.currentPosition(), (int)stepper.currentPosition(),
-    (int)stepper.targetPosition(), (int)stepper.targetPosition(),
-    (int)Backlash, (int)stepper.distanceToGo(), (int)stepper.speed(),
+    (int)focuser_position(), (int)focuser_position(),
+    (int)focuser_target(), (int)focuser_target(),
+    (int)focuser_next_backlash(), (int)stepper.distanceToGo(), (int)stepper.speed(),
     (int)dustcap.currentPosition(), (int)dustcap.targetPosition(), (int)dustcap.distanceToGo(), (int)dustcap.speed(),
     action);
   Serial.println(scratchpad);
