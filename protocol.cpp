@@ -2,7 +2,6 @@
 #include "debug.h"
 #include "compensation.h"
 #include "focuser.h"
-#include "backlash.h"
 #include "dustcap.h"
 #include "protocol.h"
 #include "sensors.h"

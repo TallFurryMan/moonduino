@@ -1,6 +1,5 @@
 #include "defs.h"
 #include "focuser.h"
-#include "backlash.h"
 #include "dustcap.h"
 #include "sensors.h"
 #include "compensation.h"

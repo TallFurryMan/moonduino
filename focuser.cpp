@@ -1,7 +1,6 @@
 #include "defs.h"
 #include "eeprom.h"
 #include "debug.h"
-#include "backlash.h"
 #include "focuser.h"
 
 // ULN2003 requires IN1-IN3-IN2-IN4
